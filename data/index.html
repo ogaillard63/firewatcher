@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FireWatcher</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class='card'>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h1>&#128293; FireWatcher</h1>
+            <div style="display:flex; align-items:center; gap:15px;">
+                <div class="theme-btn" onclick="toggleTheme()" style="cursor:pointer; font-size:1.4em; color:#2c3e50;">
+                    &#127769;</div>
+                <a href='/chart' title="Graphique" style="color:#2c3e50; text-decoration:none;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                </a>
+            </div>
+        </div>
+
+        <div id='temp_display' class='temp'>--</div>
+        <div id='status_box' class='status'>...</div>
+
+        <form id="configForm" action='/save' method='POST'>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:105px;"><label>Seuil Activation (°C)</label><input type='number'
+                        step='0.1' name='t1' id='t1'></div>
+                <div style="flex:1; min-width:105px;"><label>Seuil Alerte (°C)</label><input type='number' step='0.1'
+                        name='t2' id='t2'></div>
+            </div>
+
+            <div class='switch'>
+                <input type='checkbox' name='fmode' id='fmode'>
+                <label for='fmode'>Mode "Sympa" (Vocal)</label>
+            </div>
+
+            <div
+                style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom:1px solid #eee; margin-top:30px; padding-bottom:10px;">
+                <div class="section-title" style="border:none; margin:0; padding:0;">Mode Nuit (Deep Sleep)</div>
+                <div id='clock_display' style="font-size:1.2em; font-weight:bold; color:#555;">--:--</div>
+            </div>
+            <div style="display:flex; gap:15px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:105px;"><label>Début (h)</label><input type='number' name='ss' id='ss'
+                        min="0" max="23"></div>
+                <div style="flex:1; min-width:105px;"><label>Fin (h)</label><input type='number' name='se' id='se'
+                        min="0" max="23"></div>
+            </div>
+
+            <div class="section-title" style="color:#95a5a6; border-color:#f4f4f4; margin-top:40px;">Expert</div>
+            <div style="display:flex; gap:15px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:140px;"><label>Calibration (°C)</label><input type='number' step='0.1'
+                        name='off' id='off'></div>
+                <div style="flex:1; min-width:140px;"><label>Surchauffe (°C)</label><input type='number' step='0.1'
+                        name='tha' id='tha'></div>
+            </div>
+            <div style="display:flex; gap:15px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:140px;"><label>Seuil Extinction (°C)</label><input type='number'
+                        step='0.1' name='t3' id='t3'></div>
+                <div style="flex:1; min-width:140px;"><label>Volume</label><input type='number' name='vol' id='vol'>
+                </div>
+            </div>
+
+            <div class='switch'>
+                <input type='checkbox' name='log' id='log'>
+                <label for='log'>Logs actifs</label>
+            </div>
+
+            <button type='submit'>Enregistrer</button>
+        </form>
+    </div>
+
+    <script>
+        fetch('/get_config').then(r => r.json()).then(data => {
+            document.getElementById('t1').value = data.t1;
+            document.getElementById('t2').value = data.t2;
+            document.getElementById('t3').value = data.t3;
+            document.getElementById('off').value = data.off;
+            document.getElementById('tha').value = data.tha;
+            document.getElementById('vol').value = data.vol;
+            document.getElementById('fmode').checked = data.fmode;
+            document.getElementById('log').checked = data.log;
+            document.getElementById('ss').value = data.ss;
+            document.getElementById('se').value = data.se;
+        });
+
+        function updateStatus() {
+            fetch('/data?_=' + Date.now()).then(r => r.json()).then(data => {
+                document.getElementById('temp_display').innerHTML = data.temp + '&deg;C';
+                document.getElementById('clock_display').innerText = data.time || '--:--';
+                let s = document.getElementById('status_box');
+                s.innerText = data.status;
+                s.style.background = (data.state == 1 ? '#27ae60' : (data.state == 2 ? '#e67e22' : '#bdc3c7'));
+                if (data.state == 0) s.style.background = '#bdc3c7';
+            });
+        }
+        updateStatus();
+        setInterval(updateStatus, 5000);
+
+        function toggleTheme() {
+            document.body.classList.toggle('dark');
+            let isDark = document.body.classList.contains('dark');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            updateThemeIcon(isDark);
+        }
+
+        function updateThemeIcon(isDark) {
+            document.querySelector('.theme-btn').innerHTML = isDark ? '&#9728;' : '&#127769;';
+        }
+
+        // Init Theme
+        if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.body.classList.add('dark');
+            updateThemeIcon(true);
+        }
+        // Toast Notification Logic
+        function showToast(message) {
+            var x = document.getElementById("toast");
+            x.innerText = message;
+            x.className = "show";
+            setTimeout(function () { x.className = x.className.replace("show", ""); }, 3000);
+        }
+
+        // AJAX Form Submission
+        document.getElementById('configForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+            const formData = new URLSearchParams(new FormData(this));
+            fetch('/save', { method: 'POST', body: formData })
+                .then(response => {
+                    if (response.ok) {
+                        showToast("Configuration enregistrée !");
+                    } else {
+                        showToast("Erreur lors de l'enregistrement");
+                    }
+                })
+                .catch(err => showToast("Erreur de connexion"));
+        });
+    </script>
+    <div id="toast">Saved</div>
+</body>
+
+</html>

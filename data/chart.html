@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Historique FireWatcher</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f4f4f4;
+            text-align: center;
+            padding: 10px;
+            margin: 0;
+        }
+
+        .card {
+            background: white;
+            padding: 10px;
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+            max-width: 90%;
+            margin: 20px auto;
+            height: 80vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            width: 100%;
+            min-height: 0;
+        }
+
+        /* min-height 0 important pour flexbox */
+        button {
+            background: #2c3e50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-top: 15px;
+            align-self: center;
+        }
+
+        h2 {
+            color: #2c3e50;
+            margin-top: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h2>Courbe de Température</h2>
+        <div class="chart-container">
+            <canvas id="tempChart"></canvas>
+        </div>
+        <button onclick="window.location='/'">Retour au Tableau de Bord</button>
+    </div>
+
+    <script>
+        async function loadChart() {
+            try {
+                // Récupération du fichier CSV
+                const response = await fetch('/doc.csv');
+                if (!response.ok) throw new Error("Erreur chargement CSV");
+                const text = await response.text();
+
+                const lines = text.trim().split('\n');
+                const labels = [];
+                const dataTemp = [];
+
+                // Parsing
+                for (let i = 0; i < lines.length; i++) {
+                    // Ignorer les lignes d'en-tête (au début ou au milieu si concaténation)
+                    if (lines[i].includes("Temp;Etat") || lines[i].includes("Date;Temp") || lines[i].includes("Heure;Temp")) continue;
+
+                    const parts = lines[i].split(';');
+                    if (parts.length >= 2) {
+                        // Nouveau format: Date;Temp;State (3 colonnes) ou Ancien: Temp;State (2 colonnes)
+                        // On détecte si la première colonne est un nombre ou une date
+                        let tempVal, labelVal;
+
+                        // Essai de parsing float sur la col 0
+                        const col0 = parseFloat(parts[0]);
+
+                        if (!isNaN(col0) && parts[0].length < 10 && !parts[0].includes(':')) {
+                            // Ancien format (Temp en premier) + estimation temps
+                            tempVal = col0;
+                            const minutes = ((i - startIndex) * 0.5).toFixed(1);
+                            labelVal = minutes + "m";
+                        } else {
+                            // Nouveau format (Heure ou Date en premier)
+                            labelVal = parts[0];
+                            // Simplification du label: 
+                            // Si YYYY-MM-DD HH:MM:SS -> garde HH:MM
+                            if (labelVal.length > 16) {
+                                labelVal = labelVal.substring(11, 16);
+                            }
+                            // Si déjà HH:MM:SS -> garde HH:MM
+                            else if (labelVal.length === 8 && labelVal.includes(':')) {
+                                labelVal = labelVal.substring(0, 5);
+                            }
+                            tempVal = parseFloat(parts[1]);
+                        }
+
+                        if (!isNaN(tempVal)) {
+                            dataTemp.push(tempVal);
+                            labels.push(labelVal);
+                        }
+                    }
+                }
+
+                // Création du Graphique
+                const ctx = document.getElementById('tempChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Température (°C)',
+                            data: dataTemp,
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 0,     // Pas de point pour ne pas surcharger
+                            pointHitRadius: 10,  // Facilite le survol
+                            fill: true,
+                            tension: 0.4        // Courbe lissée
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Durée (Minutes)' },
+                                ticks: { maxTicksLimit: 12 }
+                            },
+                            y: {
+                                title: { display: true, text: 'Température (°C)' },
+                                beginAtZero: false
+                            }
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error(err);
+                alert("Erreur lors du chargement des données.");
+            }
+        }
+
+        loadChart();
+    </script>
+</body>
+
+</html>

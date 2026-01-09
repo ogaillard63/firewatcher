@@ -1,0 +1,200 @@
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #f4f4f4;
+    text-align: center;
+    padding: 8px;
+    margin: 0;
+    color: #333;
+}
+
+.card {
+    background: white;
+    padding: 20px 15px;
+    border-radius: 15px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+    max-width: 600px;
+    margin: auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+h1 {
+    margin: 0;
+    font-size: 1.5em;
+    color: #444;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.temp {
+    font-size: 4em;
+    font-weight: 700;
+    color: #2c3e50;
+    margin: 10px 0 0 0;
+    line-height: 1;
+}
+
+.status {
+    display: inline-block;
+    padding: 6px 15px;
+    border-radius: 15px;
+    color: white;
+    font-weight: 600;
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 15px;
+}
+
+form {
+    text-align: left;
+    margin-top: 30px;
+}
+
+label {
+    display: block;
+    margin-top: 15px;
+    font-weight: 600;
+    font-size: 0.85em;
+    color: #7f8c8d;
+}
+
+input[type='number'] {
+    width: 100%;
+    padding: 12px;
+    margin-top: 5px;
+    border: 1px solid #eaeaea;
+    border-radius: 8px;
+    font-size: 1em;
+    box-sizing: border-box;
+}
+
+.switch {
+    margin: 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #555;
+    font-size: 0.9em;
+}
+
+.section-title {
+    margin-top: 30px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+    color: #e74c3c;
+    font-size: 1em;
+    font-weight: bold;
+}
+
+.hint {
+    font-size: 0.75em;
+    color: #999;
+    margin-bottom: 10px;
+}
+
+button {
+    background: #2c3e50;
+    color: white;
+    border: none;
+    padding: 15px;
+    width: 100%;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-top: 25px;
+    transition: background 0.2s;
+}
+
+button:hover {
+    background: #34495e;
+}
+
+body.dark {
+    background: #121212;
+    color: #e0e0e0;
+}
+
+body.dark .card {
+    background: #1e1e1e;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    border: 1px solid #333;
+}
+
+body.dark h1 {
+    color: #ffffff;
+}
+
+body.dark .temp {
+    color: #64b5f6;
+}
+
+body.dark label {
+    color: #b0bec5;
+}
+
+body.dark input[type='number'] {
+    background: #2c2d30;
+    color: #fff;
+    border: 1px solid #444;
+}
+
+body.dark .section-title {
+    color: #ff8a80;
+    border-bottom-color: #333;
+}
+
+
+body.dark .hint {
+    color: #757575;
+}
+
+body.dark #clock_display {
+    color: #cfd8dc !important;
+}
+
+body.dark a[title='Graphique'] {
+    color: #cfd8dc !important;
+}
+
+body.dark .switch {
+    color: #cfd8dc;
+}
+
+body.dark .theme-btn {
+    color: #ffeb3b !important;
+}
+
+/* Toast Notification */
+#toast {
+    visibility: hidden;
+    min-width: 250px;
+    margin-left: -125px;
+    background-color: #27ae60;
+    color: #fff;
+    text-align: center;
+    border-radius: 50px;
+    padding: 16px;
+    position: fixed;
+    z-index: 100;
+    left: 50%;
+    bottom: 30px;
+    font-size: 16px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    transition: opacity 0.3s, bottom 0.3s;
+}
+
+#toast.show {
+    visibility: visible;
+    opacity: 1;
+    bottom: 50px;
+}
+
+body.dark #toast {
+    background-color: #2ecc71;
+    color: #121212;
+    font-weight: 600;
+}

@@ -7,9 +7,12 @@
 #include <DFRobotDFPlayerMini.h>
 #include <ArduinoOTA.h>
 #include <WiFiManager.h>
+#include <time.h> // Ajout pour NTP
 
 // --- CONFIGURATION MATÉRIELLE ---
-#define MAX_CS D0
+// ATTENTION : Pour le Deep Sleep, relier D0 (GPIO16) à RST. 
+// Le CS du MAX31865 doit donc bouger sur D4 (GPIO2).
+#define MAX_CS D4 
 #define DF_RX D2
 #define DF_TX D1
 #define RNOMINAL  100.0
@@ -17,13 +20,16 @@
 
 // Variables globales
 float tempFireActive = 80.0;
-float tempAlarmThreshold = 60.0;
+float tempAlarmThreshold = 80.0;
 float tempStoveCold = 40.0;
 float tempOffset = -5.0;
 float currentTemp = 0.0;
-bool friendlyMode = true; // Mode "Sympathique" actif par défaut
+bool friendlyMode = true; // Mode "Sympa" actif par défaut
+bool loggingEnabled = true;
 int volume = 30;
-float tempHighAlert = 150.0;
+float tempHighAlert = 170.0;
+int sleepStartHour = 23; // Heure de début sommeil (ex: 23h)
+int sleepEndHour = 7;    // Heure de fin sommeil (ex: 7h)
 
 enum StoveState { STOVE_OFF, STOVE_BURNING, STOVE_ALERT };
 StoveState currentState = STOVE_OFF;
@@ -42,6 +48,34 @@ void playMelodyInit() { playMP3(4); } // Accueil
 void playMelodyCold() { playMP3(3); } // Froid
 void playAlertSignal() { playMP3(1); } // Alerte extinction
 
+
+
+// --- LOGGING ---
+void appendLog(float temp) {
+  File f = LittleFS.open("/log.csv", "a");
+  if (f) {
+    if (f.size() > 60000) { // Rotation à ~60ko (env 12h). log.old + log.csv = 24h glissant
+       f.close();
+       LittleFS.remove("/log.old");
+       LittleFS.rename("/log.csv", "/log.old");
+       f = LittleFS.open("/log.csv", "w");
+       f.println("Heure;Temp");
+    }
+    
+    // Horodatage
+    time_t now = time(nullptr);
+    char timeStr[20];
+    if (now > 1000) { // Si NTP synchronisé
+      strftime(timeStr, sizeof(timeStr), "%H:%M:%S", localtime(&now));
+    } else {
+      sprintf(timeStr, "%lu", millis()/1000); // Fallback si pas de NTP
+    }
+
+    f.printf("%s;%.0f\n", timeStr, temp);
+    f.close();
+  }
+}
+
 // --- GESTION DES FICHIERS ---
 void loadConfig() {
   if (LittleFS.begin()) {
@@ -57,6 +91,9 @@ void loadConfig() {
         
         String sHigh = f.readStringUntil('\n'); if(sHigh.length() > 0) tempHighAlert = sHigh.toFloat();
         String sVol = f.readStringUntil('\n'); if(sVol.length() > 0) volume = sVol.toInt();
+        String sLog = f.readStringUntil('\n'); if(sLog.length() > 0) loggingEnabled = (sLog.startsWith("1"));
+        String sSS = f.readStringUntil('\n'); if(sSS.length() > 0) sleepStartHour = sSS.toInt();
+        String sSE = f.readStringUntil('\n'); if(sSE.length() > 0) sleepEndHour = sSE.toInt();
 
         f.close();
       }
@@ -74,54 +111,31 @@ void saveConfig() {
     f.println(friendlyMode ? "1" : "0");
     f.println(tempHighAlert);
     f.println(volume);
+    f.println(loggingEnabled ? "1" : "0");
+    f.println(sleepStartHour);
+    f.println(sleepEndHour);
     f.close();
   }
 }
 
 // --- WEB SERVER ---
-void handleRoot() {
-  String color = "#3498db";
-  String statusText = "FROID";
-  if(currentState == STOVE_BURNING) { color = "#27ae60"; statusText = "EN CHAUFFE"; }
-  if(currentState == STOVE_ALERT) { color = "#e67e22"; statusText = "ALERTE !"; }
-
-  String html = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1'>";
-  html += "<title>FireWatcher</title><style>";
-  html += "body{font-family:sans-serif; background:#f4f4f4; text-align:center; padding:20px;}";
-  html += ".card{background:white; padding:25px; border-radius:15px; box-shadow:0 10px 20px rgba(0,0,0,0.1); max-width:400px; margin:auto;}";
-  html += ".temp{font-size:3.5em; font-weight:bold; color:#2c3e50; margin:15px 0;}";
-  html += ".status{display:inline-block; padding:8px 20px; border-radius:20px; color:white; font-weight:bold; background:" + color + ";}";
-  html += "form{margin-top:20px; text-align:left;} label{display:block; margin-top:10px; font-weight:bold; font-size:0.9em;}";
-  html += "input[type='number']{width:100%; padding:10px; margin:5px 0; border:1px solid #ddd; border-radius:5px;}";
-  html += ".switch{margin:15px 0; display:flex; align-items:center; gap:10px;}";
-  html += "button{background:#2c3e50; color:white; border:none; padding:15px; width:100%; border-radius:5px; cursor:pointer; font-size:1.1em; margin-top:20px;}";
-  html += ".info{margin-top:10px; font-size:0.8em; color:#7f8c8d;}";
-  html += "</style></head><body>";
-  html += "<div class='card'><h1>🔥 FireWatcher</h1>";
-  html += "<div id='status_box' class='status'>" + statusText + "</div>";
-  html += "<div id='temp_display' class='temp'>" + String(currentTemp, 1) + "&deg;C</div>";
-  html += "<form action='/save' method='POST'>";
-  html += "<label>Seuil Feu Actif (&deg;C)</label><input type='number' step='0.1' name='t1' value='" + String(tempFireActive) + "'>";
-  html += "<label>Alerte si inf. à (&deg;C)</label><input type='number' step='0.1' name='t2' value='" + String(tempAlarmThreshold) + "'>";
-  html += "<label>Seuil Poêle Froid (&deg;C)</label><input type='number' step='0.1' name='t3' value='" + String(tempStoveCold) + "'>";
-  html += "<label>Calibration Offset (&deg;C)</label><input type='number' step='0.1' name='off' value='" + String(tempOffset) + "'>";
-  html += "<label>Seuil Surchauffe (&deg;C)</label><input type='number' step='0.1' name='tha' value='" + String(tempHighAlert) + "'>";
-  html += "<label>Volume (0-30)</label><input type='number' name='vol' value='" + String(volume) + "'>";
-  html += "<div class='switch'><input type='checkbox' name='fmode' id='fmode' " + String(friendlyMode ? "checked" : "") + "> <label for='fmode'>Mode Sympa</label></div>";
-  html += "<button type='submit'>Enregistrer</button></form>";
-  html += "<div class='info'>Connecté à : " + WiFi.SSID() + "<br>IP : " + WiFi.localIP().toString() + "</div></div>";
-  
-  // Script AJAX pour rafraîchir uniquement la température sans recharger la page
-  html += "<script>";
-  html += "setInterval(function(){";
-  html += " fetch('/data').then(r => r.json()).then(data => {";
-  html += "  document.getElementById('temp_display').innerHTML = data.temp + '&deg;C';";
-  html += "  let s = document.getElementById('status_box'); s.innerHTML = data.status;";
-  html += "  s.style.background = (data.state == 1 ? '#27ae60' : (data.state == 2 ? '#e67e22' : '#3498db'));";
-  html += " });";
-  html += "}, 5000);";
-  html += "</script></body></html>";
-  server.send(200, "text/html", html);
+// API pour fournir la configuration au front-end
+void handleGetConfig() {
+  String json = "{";
+  json += "\"t1\":" + String(tempFireActive) + ",";
+  json += "\"t2\":" + String(tempAlarmThreshold) + ",";
+  json += "\"t3\":" + String(tempStoveCold) + ",";
+  json += "\"off\":" + String(tempOffset) + ",";
+  json += "\"tha\":" + String(tempHighAlert) + ",";
+  json += "\"vol\":" + String(volume) + ",";
+  json += "\"fmode\":" + String(friendlyMode ? "true" : "false") + ",";
+  json += "\"log\":" + String(loggingEnabled ? "true" : "false") + ",";
+  json += "\"ss\":" + String(sleepStartHour) + ",";
+  json += "\"se\":" + String(sleepEndHour) + ",";
+  json += "\"ssid\":\"" + WiFi.SSID() + "\",";
+  json += "\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  json += "}";
+  server.send(200, "application/json", json);
 }
 
 void handleData() {
@@ -129,7 +143,15 @@ void handleData() {
   if(currentState == STOVE_BURNING) statusText = "EN CHAUFFE";
   if(currentState == STOVE_ALERT) statusText = "ALERTE !";
   
-  String json = "{\"temp\":\"" + String(currentTemp, 1) + "\", \"status\":\"" + statusText + "\", \"state\":" + String(currentState) + "}";
+  time_t now = time(nullptr);
+  char timeStr[10];
+  if (now > 1000) strftime(timeStr, sizeof(timeStr), "%H:%M", localtime(&now));
+  else strcpy(timeStr, "--:--");
+
+  char json[128];
+  snprintf(json, sizeof(json), "{\"temp\":\"%.0f\", \"status\":\"%s\", \"state\":%d, \"time\":\"%s\"}", 
+           currentTemp, statusText.c_str(), (int)currentState, timeStr);
+
   server.send(200, "application/json", json);
 }
 
@@ -145,9 +167,39 @@ void handleSave() {
     myDFPlayer.volume(volume); 
   }
   friendlyMode = server.hasArg("fmode");
+  loggingEnabled = server.hasArg("log");
+  if(server.hasArg("ss")) sleepStartHour = server.arg("ss").toInt();
+  if(server.hasArg("se")) sleepEndHour = server.arg("se").toInt();
   saveConfig();
   server.send(200, "text/html", "<html><body><script>alert('Configuration enregistr\\u00E9e !'); window.location='/';</script></body></html>");
 }
+
+// Utilisé par le graphique (chart.html) pour récupérer l'historique concaténé
+void handleDataChart() {
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/csv", "");
+
+  auto sendFile = [](String path) {
+    if (LittleFS.exists(path)) {
+      File f = LittleFS.open(path, "r");
+      if (f) {
+        uint8_t buf[512];
+        while (f.available()) {
+          int len = f.read(buf, sizeof(buf));
+          server.sendContent((const char*)buf, len);
+        }
+        f.close();
+      }
+    }
+  };
+
+  sendFile("/log.old");
+  sendFile("/log.csv");
+  server.sendContent("");
+}
+
+// Ancienne fonction handleClearLog retirée car inutilisée
+
 
 void setup() {
   Serial.begin(115200);
@@ -171,11 +223,20 @@ void setup() {
     delay(3000);
     ESP.restart();
   }
+  
+  // Configuration NTP (Heure France)
+  configTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nist.gov");
 
-  server.on("/", handleRoot);
+  // Servir l'interface statique
+  server.serveStatic("/", LittleFS, "/index.html");
+  server.serveStatic("/style.css", LittleFS, "/style.css"); 
+  server.serveStatic("/chart", LittleFS, "/chart.html");
+  server.on("/get_config", handleGetConfig); // API config
   server.on("/data", handleData);
   server.on("/save", HTTP_POST, handleSave);
-  server.onNotFound(handleRoot); 
+  server.on("/doc.csv", handleDataChart); // API pour le graphique
+  // server.on("/clearlog", handleClearLog); // Retiré
+ 
   server.begin();
 
   // Initialisation OTA
@@ -190,12 +251,60 @@ void loop() {
   ArduinoOTA.handle();
   server.handleClient();
   
+  // --- GESTION DU SOMMEIL PROFOND (MODE NUIT) ---
+  // On ne dort que si le poêle est FROID (STOVE_OFF) pour la sécurité
+  time_t now = time(nullptr);
+  if (now > 1600000000 && currentState == STOVE_OFF) { // Si l'heure est valide (NTP ok)
+    struct tm * timeinfo = localtime(&now);
+    int currentHour = timeinfo->tm_hour;
+
+    // Logique simple pour passage minuit (ex: 23h à 7h)
+    bool shouldSleep = false;
+    if (sleepStartHour > sleepEndHour) {
+      if (currentHour >= sleepStartHour || currentHour < sleepEndHour) shouldSleep = true;
+    } else {
+       // Cas rare : ex 01h à 05h
+      if (currentHour >= sleepStartHour && currentHour < sleepEndHour) shouldSleep = true;
+    }
+
+    if (shouldSleep) {
+      // Calcul du temps de sommeil en secondes jusqu'à l'heure de réveil
+      int secondsUntilWakeup = 0;
+      if (currentHour >= sleepStartHour) {
+        // Avant minuit
+        secondsUntilWakeup = ((24 - currentHour) + sleepEndHour) * 3600 - (timeinfo->tm_min * 60) - timeinfo->tm_sec;
+      } else {
+        // Après minuit
+        secondsUntilWakeup = (sleepEndHour - currentHour) * 3600 - (timeinfo->tm_min * 60) - timeinfo->tm_sec;
+      }
+      
+      // Sécurité: Si calcul foireux ou trop court, on ne dors pas tout de suite
+      if (secondsUntilWakeup > 60) {
+        Serial.printf("Activating Deep Sleep for %d seconds\n", secondsUntilWakeup);
+        // Deep Sleep max ~3h sur ESP8266. On limite.
+        // Si wakeup > 3h, on dort 3h, on se réveille, on reconnecte et on redort.
+        uint64_t sleepUs = (uint64_t)secondsUntilWakeup * 1000000ULL;
+        uint64_t maxSleep = 10000000000ULL; // ~2.7h (safe margin)
+        if (sleepUs > maxSleep) sleepUs = maxSleep;
+        
+        ESP.deepSleep(sleepUs);
+      }
+    }
+  }
+
   static unsigned long lastUpdate = 0;
   static unsigned long lastFriendlyMsg = 0;
   static unsigned long lastBip = 0;
 
   if (millis() - lastUpdate > 5000) { 
     lastUpdate = millis();
+    
+    // Log périodique (toutes les 30s = 6 cycles de 5s)
+    static int logCounter = 0;
+    if (++logCounter >= 6) {
+       logCounter = 0;
+       if (loggingEnabled) appendLog(currentTemp);
+    }
     
     float rawTemp = thermo.temperature(RNOMINAL, RREF);
     currentTemp = rawTemp + tempOffset;
@@ -238,8 +347,10 @@ void loop() {
         if (millis() - lastBip > 60000) { 
           lastBip = millis();
           playAlertSignal();
+          playAlertSignal();
         }
-        if (currentTemp > tempFireActive) currentState = STOVE_BURNING;
+        // Hysteresis de sortie d'alerte : on sort si on repasse au dessus du seuil d'alerte + 2°C
+        if (currentTemp > (tempAlarmThreshold + 2.0)) currentState = STOVE_BURNING;
         else if (currentTemp < tempStoveCold) {
           currentState = STOVE_OFF;
           playMelodyCold();
